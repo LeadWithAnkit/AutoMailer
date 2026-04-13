@@ -1,52 +1,66 @@
-import fs from 'fs';
-import { extractEmailsFromFile } from '../utils/fileParser.js';
+import { extractEmailsFromBuffer } from '../utils/fileParser.js';
 import { sendEmailWithRetry } from '../utils/mailer.js';
 
 export const processEmails = async (req, res) => {
-    const { emailListFile, resumePDF } = req.files;
+    const { emailListFile, resumePDF } = req.files || {};
     const { manualEmails, customMessage, subject } = req.body;
 
     let finalEmailList = [];
 
     try {
-        if (emailListFile) {
-            const fileEmails = await extractEmailsFromFile(emailListFile[0].path);
+        // Extract emails from uploaded file 
+        if (emailListFile && emailListFile[0]) {
+            const file = emailListFile[0];
+            const fileEmails = await extractEmailsFromBuffer(file.buffer, file.originalname);
             finalEmailList = [...finalEmailList, ...fileEmails];
         }
 
+        // emails from manual input
         if (manualEmails) {
             const manualRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,15}/gi;
             const extractedManual = manualEmails.match(manualRegex) || [];
             finalEmailList = [...finalEmailList, ...extractedManual];
         }
 
+        // Deduplicate
         finalEmailList = [...new Set(finalEmailList.map(e => e.toLowerCase()))];
 
         if (finalEmailList.length === 0) {
-            return res.status(400).json({ message: 'No valid emails found anywhere.' });
+            return res.status(400).json({ message: 'No valid emails found.' });
         }
 
+        if (!resumePDF || !resumePDF[0]) {
+            return res.status(400).json({ message: 'Resume PDF is required.' });
+        }
+
+        const resumeBuffer = resumePDF[0].buffer;
+
+        // Send emails with 1s dely
         const results = [];
         for (let i = 0; i < finalEmailList.length; i++) {
             const result = await sendEmailWithRetry(
                 finalEmailList[i],
-                subject || "Resume Submission",
+                subject || 'Resume Submission',
                 customMessage,
-                resumePDF[0].path
+                resumeBuffer
             );
             results.push(result);
 
             if (i < finalEmailList.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }
 
-        if (emailListFile) fs.unlinkSync(emailListFile[0].path);
-        fs.unlinkSync(resumePDF[0].path);
-
-        res.status(200).json({ success: true, total: finalEmailList.length, results });
+        res.status(200).json({
+            success: true,
+            total: finalEmailList.length,
+            sent: results.filter(r => r.status === 'success').length,
+            failed: results.filter(r => r.status === 'failed').length,
+            results
+        });
 
     } catch (error) {
-        res.status(500).json({ message: 'Server processing error.' });
+        console.error('processEmails error:', error);
+        res.status(500).json({ message: 'Server processing error: ' + error.message });
     }
 };

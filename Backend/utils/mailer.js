@@ -9,19 +9,32 @@ const transporter = nodemailer.createTransport({
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
     },
+    // Increase timeout for Render's slow cold starts
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 60000,
 });
 
-//Sends email with a simple retry mechanism
-export const sendEmailWithRetry = async (to, subject, text, attachmentPath, retries = 2) => {
+// Verify transporter on startup
+transporter.verify((error) => {
+    if (error) {
+        console.error('Mailer config error:', error.message);
+    } else {
+        console.log('Mailer ready ');
+    }
+});
+
+export const sendEmailWithRetry = async (to, subject, text, resumeBuffer, retries = 2) => {
     const mailOptions = {
-        from: process.env.EMAIL_USER,
+        from: `"AutoMailer" <${process.env.EMAIL_USER}>`,
         to,
         subject,
-        text,
+        text: text || 'Please find my resume attached.',
         attachments: [
             {
                 filename: 'Resume.pdf',
-                path: attachmentPath,
+                content: resumeBuffer,   // buffer — no file path needed
+                contentType: 'application/pdf',
             },
         ],
     };
@@ -29,11 +42,11 @@ export const sendEmailWithRetry = async (to, subject, text, attachmentPath, retr
     for (let i = 0; i <= retries; i++) {
         try {
             await transporter.sendMail(mailOptions);
+            console.log(` Sent to ${to}`);
             return { email: to, status: 'success' };
         } catch (error) {
+            console.error(` Failed to ${to} (attempt ${i + 1}): ${error.message}`);
             if (i === retries) return { email: to, status: 'failed', error: error.message };
-            console.log(`Retrying for ${to}... Attempt ${i + 1}`);
-            // Wait 1 second before retry
             await new Promise(res => setTimeout(res, 1000));
         }
     }
