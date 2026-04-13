@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({
   origin: [
     'http://localhost:5173',
-    'https://your-frontend-name.onrender.com'  // ← your Render frontend URL
+    'https://automailer-6j3a.onrender.com'  
   ],
   credentials: true
 }));
